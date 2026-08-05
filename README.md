@@ -2,7 +2,7 @@
 
 Detects 24-hour base-station traffic profiles that deviate from "normal" behavior, using reconstruction error from a dense autoencoder as the anomaly score.
 
-> **Note on data:** the original analysis was run on a confidential telecom dataset, which cannot be published. This repo uses a **synthetic dataset instead** — generated to match the aggregate per-hour statistics of the original (mean/std of log-traffic and an hour-to-hour correlation structure), with a small set of labeled anomalies (outages, spikes, phase shifts, inversions) injected on top. No real site-level data is included anywhere in this repo or its history. The synthetic version has one advantage the original didn't: ground-truth labels, which allow the pipeline below to be evaluated quantitatively.
+> **Note on data:** the original analysis was run on a confidential telecom dataset. The dataset used here merges a **synthetic dataset** — generated to match the aggregate per-hour statistics of the original (mean/std of log-traffic and an hour-to-hour correlation structure), with labeled anomalies (outages, spikes, phase shifts, inversions) injected on top — with the original real profiles, which are included with their site identifiers replaced by the same anonymized `S####` scheme (approved for publication by the data owner). Only the identifiers were changed; only the synthetic portion carries ground-truth anomaly labels, since that's the only part where the "true" answer is known by construction.
 
 ## Problem
 
@@ -10,31 +10,31 @@ A telecom network exposes hourly traffic volume for base stations, each summariz
 
 ## Approach
 
-1. **Generate** a synthetic dataset (743 stations) calibrated to the real data's aggregate per-hour statistics, with ~5% labeled anomalies injected (outage / spike / phase-shift / inversion).
+1. **Generate** a synthetic dataset (743 stations) calibrated to the real data's aggregate per-hour statistics, with ~5% labeled anomalies injected (outage / spike / phase-shift / inversion), then **merge** in the real (re-identified) profiles — 1,486 stations total.
 2. **Normalize** each profile by its own daily mean, so the model learns hourly *shape* rather than absolute traffic volume.
 3. **Split** into train/validation (80/20) and run a **grid search** over 6 encoder architectures × 2 learning rates × 3 random seeds, selecting the combination with the lowest mean validation MSE.
 4. **Retrain** the selected architecture with early stopping; cache the trained weights and training history to disk so the notebook doesn't retrain on every run.
 5. **Score** every station by reconstruction error (RMSE between actual and reconstructed profile) and **threshold** at the 95th percentile of the training-set error distribution.
-6. **Validate** both visually (actual vs. reconstructed curves) and quantitatively — precision, recall, F1, ROC-AUC, and per-anomaly-type recall against the injected ground truth.
+6. **Validate** both visually (actual vs. reconstructed curves) and quantitatively — precision, recall, F1, ROC-AUC, and per-anomaly-type recall against the injected ground truth (synthetic subset only, since that's the only subset with known labels).
 
 ## Results
 
-- Selected architecture: `24 → 8 → 24` (single 8-unit bottleneck), learning rate 1e-3, mean validation MSE ≈ 0.0148 (averaged over 3 seeds).
-- **40 of 743 stations (5.4%)** flagged as anomalous at the 95th-percentile threshold (0.140).
-- Against the injected ground truth: **precision 0.68, recall 0.71, F1 0.69, ROC-AUC 0.94**.
-- Recall by injected anomaly type: spike 1.00, outage 0.70, phase-shift 0.60, inversion 0.50 — sudden bursts are caught almost every time, while a fully inverted daily cycle (same energy, opposite shape) is the hardest case, as expected for a reconstruction-error-based detector.
+- Selected architecture: `24 → 8 → 24` (single 8-unit bottleneck), learning rate 5e-4, mean validation MSE ≈ 0.0137 (averaged over 3 seeds).
+- **75 of 1,486 stations (5.0%)** flagged as anomalous at the 95th-percentile threshold (0.204) — 51/743 among the synthetic subset, 24/743 among the real subset.
+- Against the injected ground truth (synthetic subset only): **precision 0.71, recall 0.95, F1 0.81, ROC-AUC 0.99**.
+- Recall by injected anomaly type: spike 1.00, phase-shift 1.00, inversion 1.00, outage 0.80 — nearly every injected anomaly type is caught at this threshold.
 
 ![Actual vs. reconstructed traffic profiles for the 5 most anomalous stations](images/reconstruction_anomalous.png)
 
-*The 5 highest-error stations — mostly injected spikes — where the model's reconstruction (orange) is visibly damped relative to the actual spike (blue).*
+*The 5 highest-error stations (all from the synthetic/injected-spike subset) — the model's reconstruction (orange) is visibly damped relative to the actual spike (blue).*
 
 ![Actual vs. reconstructed traffic profiles for the 5 most typical stations](images/reconstruction_typical.png)
 
-*For contrast, the 5 lowest-error stations: reconstruction tracks the actual profile almost exactly.*
+*For contrast, the 5 lowest-error stations (all from the real subset): reconstruction tracks the actual profile almost exactly.*
 
 ![ROC curve for reconstruction error as an anomaly score](images/roc_curve.png)
 
-*ROC-AUC of 0.94 — reconstruction error is a strong ranking signal for the injected anomalies, well above chance.*
+*ROC-AUC of 0.99 on the labeled (synthetic) subset — reconstruction error is a strong ranking signal for the injected anomalies, well above chance.*
 
 ## Repo structure
 
@@ -56,14 +56,15 @@ pip install -r requirements.txt
 jupyter notebook SDA.ipynb
 ```
 
-Run all cells top to bottom. The dataset is generated in-notebook (no external file needed). The architecture search and final model training are cached to disk (`tuning_results.csv`, `sda_autoencoder.keras`, `sda_training_history.pkl`) — delete those files, or set the `FORCE_RETRAIN_*` flags near the top of their respective cells to `True`, to reproduce the search/training from scratch (~10–15 min on CPU).
+Run all cells top to bottom. The synthetic portion of the dataset is generated in-notebook; the real (re-identified) portion is loaded from a local `dataset.xlsx` if present, and the notebook falls back to synthetic-only data automatically if that file is absent — so the headline numbers above (1,486 rows) reflect the full merged dataset, while a from-scratch run without `dataset.xlsx` will reproduce the same methodology on 743 synthetic rows only, with different specific numbers. The architecture search and final model training are cached to disk (`tuning_results.csv`, `sda_autoencoder.keras`, `sda_training_history.pkl`) — delete those files, or set the `FORCE_RETRAIN_*` flags near the top of their respective cells to `True`, to reproduce the search/training from scratch (~10–15 min on CPU).
 
 ## Limitations & next steps
 
-- This is a synthetic stand-in for the confidential original dataset. The generator matches the *aggregate* per-hour statistics of the real data, but the injected anomaly types are a designer's guess at what real anomalies look like — real-world anomalies may differ, so the precision/recall numbers above validate the *methodology*, not a guarantee of production performance.
+- Ground-truth labels only exist for the synthetic subset, so precision/recall/F1/ROC-AUC above are computed on that subset only — the real subset's flagged stations (24/743) have no way to be checked against a known answer here.
+- The injected anomaly types are a designer's guess at what real anomalies look like; real-world anomalies may take different or subtler forms than outage/spike/phase-shift/inversion.
 - The threshold is a single global percentile; it doesn't account for stations whose normal behavior is inherently more variable than others.
 - Each day is scored independently; there's no use of history, so a station that is *consistently* unusual every day looks identical to a one-off event.
-- Next: benchmark against a simpler baseline (PCA reconstruction error or per-hour z-scores) to quantify what the autoencoder specifically adds; extend to sequence models (e.g. LSTM autoencoder) if multi-day data becomes available; revisit the injected anomaly taxonomy against real incident/outage records once deployed on real traffic.
+- Next: benchmark against a simpler baseline (PCA reconstruction error or per-hour z-scores); extend to sequence models (e.g. LSTM autoencoder) if multi-day data becomes available; cross-check the 24 flagged real stations against actual incident/outage records if any exist.
 
 ## Tech stack
 
