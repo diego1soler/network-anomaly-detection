@@ -3,5 +3,5 @@ numpy
 matplotlib
 scikit-learn
 tensorflow
-openpyxl
+pyarrow
 jupyter

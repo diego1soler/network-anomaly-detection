@@ -3,3 +3,10 @@ __pycache__/
 *.pyc
 .claude/
 dataset.xlsx
+dataset_export.xlsx
+ground_truth.parquet
+_run_pipeline.py
+_pipeline_run.log
+_pipeline_summary.json
+_nbconvert.log
+_nbconvert.done
