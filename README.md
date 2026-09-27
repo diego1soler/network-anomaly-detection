@@ -1,19 +1,16 @@
 # Network Traffic Anomaly Detection with a Dense Autoencoder
 
-Detects 24-hour base-station traffic profiles that deviate from "normal" behavior, using reconstruction error from a dense autoencoder as the anomaly score — a fully unsupervised approach, with no labeled anomalies assumed at any point.
+Detects 24-hour base-station traffic profiles that deviate from "normal" behavior, using reconstruction error from a dense autoencoder as the anomaly score. This is a fully unsupervised approach, with no labeled anomalies assumed at any point, ressembling a real world-scenario where labeled anomalies are scarce.
 
 ## Problem
 
-A telecom network exposes hourly traffic volume for base stations, each summarized as a 24-value daily profile (one value per hour, 0–23). The goal is to flag stations whose daily traffic *shape* is structurally unusual — e.g. an unexpected spike, outage, or phase shift — without assuming labeled examples of "anomalous" behavior are available at training time. This mirrors the real-world constraint that motivated the project: a network operations team doesn't get a pre-labeled list of anomalies, so any workable detector has to be built and validated without one.
+A telecom network exposes hourly traffic volume for base stations, each summarized as a 24-value daily profile (one value per hour, 0–23). The goal is to flag stations whose daily traffic *shape* is structurally unusual — e.g. an unexpected spike, outage, phase shift, capacity problems — without assuming labeled examples of "anomalous" behavior are available at training time. This mirrors the real-world constraint that motivated the project: a network operations team doesn't get a pre-labeled list of anomalies, so any workable detection model has to be built and validated without one.
 
 ## Data
 
-The original analysis was run on a confidential telecom dataset. `dataset.parquet` — the only data artifact published in this repo — is a 1,455-row table (`site`, then 24 hourly columns `0`–`23`) merging two sources:
+The original analysis was run on a confidential telecom dataset. `dataset.parquet` is the only data artifact published in this repo, containing a 1,455-row table (`site`, then 24 hourly columns `0`–`23`) generated from a model calibrated to the aggregate per-hour statistics of the original confidential dataset (per-hour mean/std of log-traffic, plus an hour-to-hour correlation structure), using completely artificial site IDs.
 
-- **743 real profiles**, with site identifiers replaced by an anonymized `S####` scheme. Only the identifier changes — the traffic values themselves are untouched (approved for publication in this anonymized form by the data owner).
-- **712 synthetic profiles**, generated from a model calibrated to the aggregate per-hour statistics of the original confidential dataset (per-hour mean/std of log-traffic, plus an hour-to-hour correlation structure), under the same anonymized ID scheme.
-
-No anomaly labels are published alongside this data. That's intentional, not an oversight — it keeps the detection method honest to the constraint it was actually built under.
+No anomaly labels are published alongside this data. That's intentional to keep the detection method honest to the constraint it was actually built under.
 
 ## Approach
 
@@ -62,7 +59,8 @@ Run all cells top to bottom. The notebook loads `dataset.parquet` directly — n
 
 ## Limitations & next steps
 
-- Without ground truth, there's no way to directly measure precision or recall — flagged stations are strong *candidates* for review, not confirmed anomalies. This is an inherent limitation of unsupervised detection, not a gap specific to this pipeline.
+- Without ground truth, there's no way to directly measure precision or recall — flagged stations are strong *candidates* for review, not confirmed anomalies. This is an inherent limitation of unsupervised detection.
+- The selected methodology is intended to act as a simple tool that detect anomalous sites candidates that could be shared with mobile operator quality team for further problem inspection and addressing.
 - The threshold is a single global percentile; it doesn't account for stations whose normal behavior is inherently more variable than others.
 - Each day is scored independently; there's no use of history, so a station that is *consistently* unusual every day looks identical to a one-off event.
 - Next: benchmark against a simpler baseline (PCA reconstruction error or per-hour z-scores) to see how much the autoencoder's nonlinearity actually buys over a linear method; extend to sequence models (e.g. LSTM autoencoder) if multi-day data becomes available; cross-check flagged stations against actual incident/outage records, if any exist, to close the loop with a real precision estimate.
